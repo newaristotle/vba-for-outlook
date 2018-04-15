@@ -1,0 +1,465 @@
+
+'version 1.2  2018.4.11
+
+
+
+Public My_Email_Address As String                    '所有的收件人(包括社内、外outlook，tb系统）
+Public pw As Long                                    '随机密码
+Public My_Subject As String                          '邮件的标题
+Public att_name As String                            '附件名称
+
+
+
+Public Function Pings(strMachines As String) As Boolean   '判断网络情况,返回boolean
+aMachines = Split(strMachines, ";")
+For Each machine In aMachines
+Set objPing = GetObject("winmgmts:{impersonationLevel=impersonate}").ExecQuery("select * from Win32_PingStatus where address = '" & machine & "'")
+For Each objStatus In objPing
+If IsNull(objStatus.StatusCode) Or objStatus.StatusCode <> 0 Then
+Debug.Print ("machine " & machine & " is not reachable")
+Pings = False
+Else
+Pings = True
+End If
+Next
+Next
+End Function
+
+
+
+
+
+Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)  '全部人用 ，向 社内通讯添加数据
+
+
+
+Dim sender As String
+sender = "tbfc.it@toyota-boshoku.com"   '这个根据每个人的邮箱情况不同进行修改
+Dim sendername As String
+sendername = "liguozhan"
+
+
+On Error Resume Next
+Dim mailto As String
+Dim mailcc As String
+Dim My_Body  As String
+
+Dim ress As String
+Dim file As String  '文件名
+Dim outlookname As String
+My_Subject = Item.Subject
+My_Body = "<HTML>" & Item.HTMLBody
+mailto = Item.To
+mailcc = Item.CC
+
+Dim recips As Outlook.Recipients  '收件人集合’
+Dim recip As Outlook.Recipient  '收件人
+Set recips = Item.Recipients
+Dim addsql As Integer   '判断是否要发送给内部邮箱
+
+
+
+
+att_name = "附件"
+
+
+
+
+'*****************************************将收件人分成：tb邮箱、社内outlook邮箱、社外outlook邮箱、其他**************************************************************
+
+My_Email_Address = ""                                             '因为My_Email_Address是全局变量，会自动叠加，所以需要每次按"发送"时清空
+
+For Each recip In recips
+If recip.Address = "tbfc@tbfc.com.cn" Or recip.Address Like "*tb@*" Then         '如果是发件人,就直接添加姓名
+My_Email_Address = recip.Name & ";" & My_Email_Address
+ElseIf InStr(recip.Address, "tbfc.com.cn") And recip.Address <> "tbfc@tbfc.com.cn" Then          '如果收件人，包含tbfc.com.cn  就 添加tbfc旧邮箱
+My_Email_Address = recip.Address & ";" & My_Email_Address
+ElseIf recip.Address Like "*@toyota-boshoku.com*" Then
+My_Email_Address = recip.Address & ";" & My_Email_Address
+ElseIf recip.Address Like "*[oO][uU]=[Ee][Xx][cC][Hh][aA][Nn][Gg][Ee]*" Then
+My_Email_Address = recip.AddressEntry.GetExchangeUser.PrimarySmtpAddress & ";" & My_Email_Address   '如果收件人,exchange 邮箱 就发送exchange邮箱
+Else: My_Email_Address = recip.Address & ";" & My_Email_Address
+End If
+Next
+
+'*****************************************将收件人分成：tb邮箱、社内outlook邮箱、社外outlook邮箱、其他**************************************************************
+
+
+
+
+
+
+
+
+My_Email_Address_spread = Split(My_Email_Address, ";")
+ 
+My_Email_Address_num_max = UBound(My_Email_Address_spread)
+                     
+Dim outside_mail_origin As String                       '经外网发送的邮箱地址
+Dim tbfc As Integer
+tbfc = 0
+
+For My_Email_Address_num = 0 To (My_Email_Address_num_max - 1)
+
+    If My_Email_Address_spread(My_Email_Address_num) Like "*tbfc.com.cn*" Or ress Like "*tb@*" Then    '判断邮箱地址是否包含内部邮箱.
+    addsql = 1: tbfc = 11
+    Else
+    addsql = 0
+    End If
+
+
+    If addsql = 0 Then
+    outside_mail_origin = My_Email_Address_spread(My_Email_Address_num) & ";" & outside_mail_origin
+    End If
+
+Next
+
+        If tbfc = 11 Then  '如果发送邮箱到内部邮箱
+    
+        If Pings("192.168.44.200") = True Then  'n内网连接正常
+        
+        For q = 1 To Item.Attachments.Count
+        Dim files As String
+        Dim filename As String
+        filename = Item.Attachments(q).filename
+        Dim fmat As String
+        If InStr(Item.Attachments(q).filename, "~") = False Then
+        fmat = Mid(filename, InStr(filename, "."), Len(filename) - InStr(filename, ".") + 1)
+        
+        
+        file = q & sendername & Format(Now(), "yyyymMdHHmm")
+        Item.Attachments(q).SaveAsFile "\\192.168.44.202\e\emailsend\" & file & fmat  '复制到emailsend 文件夹里面
+        
+        files = file & fmat & ";" & files   '添加字符串
+        End If
+        Next
+        
+
+        
+        Dim conn As Object, rs As Object
+        Dim sql As String
+        My_Email_Address = Replace(My_Email_Address, "'", "")
+        My_Body = Replace(My_Body, "'", "")
+        Set conn = CreateObject("ADODB.Connection") '建立ADODB连接对象
+        conn.connectionstring = "Provider=SQLOLEDB.1;Password=Ljh810424;Persist Security Info=True;User ID=fstbfc;Initial Catalog=konglv;Data Source=TBFCSVR4\SQLEXPRESS"
+        conn.Open
+        sql = "INSERT INTO [timeremailsend] (sender,sendto,senddate,sendtime,sendfiles,sendsubject,sendbody) VALUES ('" & sender & "' ,'" & My_Email_Address & "','" & Now() & "','" & Now() & "','" & files & "','" & My_Subject & "','" & My_Body & "')"
+        conn.Execute sql
+        conn.Close
+        Set conn = Nothing
+        
+        Else
+        MsgBox "TBFC inside network cannot connect,Your email failed to send to '@tbfc.com.cn'."
+        End If
+        End If
+
+
+
+
+
+'***************************************************************************************************************************************************
+
+
+
+
+
+
+'******************************************************************判断outlook邮箱是否属于社内员工的邮箱*********************************************
+
+Dim mr As Integer                                 '共享上mail_list的最大非空行号
+
+Dim xlApp As Excel.Application
+
+Set xlApp = CreateObject("Excel.Application")       '创建EXCEL对象
+
+xlApp.Visible = False                               '设置EXCEL对象不可见
+
+
+Dim mail_list As Excel.Workbook
+Set mail_list = xlApp.Workbooks.Open("D:\7-Zip\mail_list.xlsx", , 1, , "123")
+mr = mail_list.Worksheets(1).[A65535].End(xlUp).Row
+
+
+Dim outside_mail_origin_spread As Variant
+Dim outside_mail_origin_spread_max As Integer
+Dim outside_mail_end As String
+Dim outside_mail_end_num As Integer
+
+outside_mail_origin_spread = Split(outside_mail_origin, ";")
+outside_mail_origin_spread_max = UBound(outside_mail_origin_spread)
+outside_mail_origin_spread_num = 0
+outside_mail_end_num = 0
+
+
+Dim m As Integer
+Dim exist As Boolean
+For outside_mail_origin_spread_num = 0 To (outside_mail_origin_spread_max - 1)
+For m = 1 To mr
+If outside_mail_origin_spread(outside_mail_origin_spread_num) <> mail_list.Worksheets(1).Cells(m, 1) Then
+exist = False
+Else: exist = True: Exit For
+End If
+Next
+If exist = False Then outside_mail_end = outside_mail_origin_spread(outside_mail_origin_spread_num) & ";" & vbNewLine & outside_mail_end: outside_mail_end_num = outside_mail_end_num + 1
+Next
+
+mail_list.Close savechanges = False
+Set xlApp = Nothing '释放xlApp对象
+xlApp.Quit '结束EXCEL对象
+
+'******************************************************************判断outlook邮箱是否属于社内员工的邮箱*********************************************
+
+
+
+
+
+
+
+
+
+
+Dim olatt As Object
+Dim Attachment_name_spread As Variant
+Dim Attachment_name_max As Integer
+Dim Attachment_num As Integer
+
+
+
+    If Dir("D:\7-Zip\Oltemp\*") <> "" Then Kill "D:\7-Zip\Oltemp\*"
+    If outside_mail_end_num > 0 And Item.Attachments.Count > 0 Then    '需要发向社外，同时又带有附件
+
+
+
+    For Attachment_num = 1 To Item.Attachments.Count
+    Set olatt = Item.Attachments(Attachment_num)
+    olatt.SaveAsFile "D:\7-Zip\Oltemp\" & olatt.DisplayName
+    Next
+
+    Call compress_sub
+
+
+    While Item.Attachments.Count > 0
+    Item.Attachments.Remove 1
+    Wend
+
+
+    Item.Attachments.Add "D:\7-Zip\" & att_name & ".zi_", olByValue, 1
+
+
+
+
+
+
+'*************************************************判断压缩后附加是否超过10MB********************************************************
+    If Item.Attachments(1).Size > 10485758 Then
+    nu = MsgBox("注意:附件大小超出10MB，请将附件分开发送！", vbInformation + vbOKOnly + vbDefaultButton1, "附近超出限定容量")
+    Cancel = True
+    End If
+'*************************************************判断压缩后附加是否超过10MB********************************************************
+
+
+    Call password_send
+
+    End If
+
+
+
+
+
+'*************************************************判断对于只发送到社内邮箱的邮件，压缩前的附加是否超过10MB********************************************************
+If outside_mail_end_num = 0 And Item.Attachments.Count > 0 Then
+Dim Attachment_size_sum As Long
+Attachment_size_sum = 0
+For Attachment_num = 1 To Item.Attachments.Count
+Attachment_size_sum = Attachment_size_sum + Item.Attachments(Attachment_num).Size
+Next
+If Attachment_size_sum > 10485758 Then
+nu = MsgBox("注意:附件大小超出10MB，请将附件分开发送！", vbOKOnly + vbInformation + vbDefaultButton1, "附近超出限定容量")
+Cancel = True
+End If
+End If
+End Sub
+
+'*************************************************判断对于只发送到社内邮箱的邮件，压缩前的附加是否超过10MB********************************************************
+
+
+
+
+
+
+
+
+
+
+
+'*************************************************压缩附件********************************************************
+
+Sub compress_sub()
+pw = 100000 * Rnd()
+Dim time As String
+
+'time = Format(Now, "MDhms")
+
+
+Set compress = CreateObject("Wscript.Shell")
+If Dir("D:\7-zip\compress.bat") <> "" Then Kill "D:\7-zip\compress.bat"
+Shell "cmd /c del /q D:\7-Zip\*.zi_", vbHide                                '删除所有 *.zi_文件
+Shell "cmd /c del /q D:\7-Zip\*.tmp", vbHide                                '删除所有 *.tmp_文件
+Open ("D:\7-zip\compress.bat") For Output As #66
+
+Print #66, "D" & ":" & "\" & "7-Zip" & "\" & "7Z.exe" & " a " & "-" & "tzip " & "-" & "r " & "-" & "p" & pw& _
+; " " & "D" & ":" & "\" & "7-Zip" & "\" & att_name & ".zi_" & "  " & "D" & ":" & "\" & "7-Zip" & "\" & "Oltemp" & "\" & "*"
+Close #66
+compress.Run "D:\7-zip\compress.bat", 0, True
+'run函数有三个参数，第一个参数是你要执行的程序的路径，若路径中存在空格，记得要用""括起来，如 """C:\Program Files\nn.exe"""的形式或者Chr(34)&"C:\Program Files\nn.exe"&Chr(34)的形式，
+'第二个程序是窗口的形式，0是在后台运行；1表示正常运行；2表示激活程序并且显示为最小化；3表示激活程序并且显示为最大化；一共有10个这样的参数如下表。 第三个参数是表示这个脚本是等待还是继续执行，
+'如果设为了true , 脚本就会等待调用的程序退出后再向后执行?
+
+End Sub
+'*************************************************压缩附件**********************************************************
+
+
+
+
+
+
+
+
+
+
+'*************************************************自动发送解密密码并保存**************************************************
+
+Sub password_send()
+    Dim objOL As Object
+    Dim itmNewMail As Object
+    Set objOL = CreateObject("Outlook.Application")
+    Set itmNewMail = objOL.CreateItem(olMailItem)
+    
+    With itmNewMail
+        .Subject = "password for: " & My_Subject '主题
+        .Attachments.Add "D:\7-Zip\a.jpg"        '追加解压说明图片
+        .HTMLBody = "<p>你好</p>" & "邮件" & """" & My_Subject & """" & "中附件的解压密码是: " & pw & "<p>附件解压的方法</p>" & "<p><img src='cid:a.jpg' height=480 width=360></p>" & "<p> 本邮件由TBFC邮件加密系统自动发送，请勿回复，谢谢。 </p>"
+        .To = My_Email_Address  '收件者
+        .Send                  '自动发送
+    End With
+   
+Call pw_backup
+
+ End Sub
+'*************************************************自动发送解密密码并保存**************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'*************************************************将mail_list保存到本地*************************************************
+Private Sub Application_Startup()
+
+If Pings("192.168.44.202") = True Then
+FileCopy "\\192.168.44.202\e\mail_list\mail_list.xlsx", "D:\7-Zip\mail_list.xlsx"
+End If
+
+on_off_switch = False
+
+
+End Sub
+
+'*************************************************将mail_list保存到本地*************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+'*************************************************用于延迟执行**************************************************
+
+Sub Delay(DelaySec)
+  NowTime = Timer * 100
+  DelaySec = DelaySec * 100
+  Do
+    NewTime = Timer * 100
+    DoEvents
+  Loop Until NewTime - NowTime > DelaySec
+End Sub
+'*************************************************用于延迟执行**************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+'*****************************************************保存密码*********************************************************
+Sub pw_backup()
+
+Dim pw_backup_mr As Integer                                 '共享上mail_list的最大非空行号
+
+Dim pw_backup_xlApp As Excel.Application
+
+Set pw_backup_xlApp = CreateObject("Excel.Application")       '创建EXCEL对象
+
+pw_backup_xlApp.Visible = False                               '设置EXCEL对象不可见
+
+Dim pw_backup As Excel.Workbook
+Set pw_backup = pw_backup_xlApp.Workbooks.Open("D:\7-Zip\pw_backup.xlsx", , , , , 1, 1, , , 1)
+pw_backup_mr = pw_backup.Worksheets(1).[A65535].End(xlUp).Row + 1
+
+If pw_backup_mr < 3000 Then
+pw_backup.Worksheets(1).Cells(pw_backup_mr, 1) = Now
+pw_backup.Worksheets(1).Cells(pw_backup_mr, 2) = My_Subject
+pw_backup.Worksheets(1).Cells(pw_backup_mr, 3) = pw
+
+ElseIf pw_backup_mr = 3000 Then
+pw_backup_mr = WorksheetFunction.Min(pw_backup.Worksheets(1).Range("A2:A2999"))
+pw_backup.Worksheets(1).Cells(pw_backup_mr, 1) = Now
+pw_backup.Worksheets(1).Cells(pw_backup_mr, 2) = My_Subject
+pw_backup.Worksheets(1).Cells(pw_backup_mr, 3) = pw
+End If
+
+pw_backup.Close savechanges:=True
+Set pw_backup_xlApp = Nothing '释放xlApp对象
+pw_backup_xlApp.Quit '结束EXCEL对象
+
+End Sub
+'*****************************************************保存密码*********************************************************
+
+
+
+
+
+
+
+
+
+
